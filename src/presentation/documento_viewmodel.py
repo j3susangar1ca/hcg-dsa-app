@@ -1,5 +1,6 @@
 # src/presentation/documento_viewmodel.py
 import random
+import os
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QFileDialog
 from src.domain.enums import FaseCicloVida
@@ -19,6 +20,7 @@ class DocumentoViewModel(QObject):
     analisis_completado = Signal(dict)
     archivo_seleccionado = Signal(str)
     archivo_movido = Signal(str)
+    url_pdf_cambiada = Signal(str)
 
     def __init__(self, analyzer_service: DocumentAnalyzerService, ocr_processor: OcrProcessor, storage: NetworkStorageManager):
         super().__init__()
@@ -37,6 +39,11 @@ class DocumentoViewModel(QObject):
         if ruta:
             self.ruta_archivo = ruta
             self.archivo_seleccionado.emit(ruta)
+            
+            # Convertimos la ruta local a formato URL para el navegador interno
+            url = f"file:///{ruta.replace(os.sep, '/')}"
+            self.url_pdf_cambiada.emit(url)
+            
             self.estado_cambiado.emit(f"Archivo cargado: {ruta}. Listo para extraer texto.")
             
             # Extraemos el texto inmediatamente

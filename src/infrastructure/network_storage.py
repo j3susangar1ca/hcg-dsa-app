@@ -1,26 +1,52 @@
-# src/infrastructure/network_storage.py
-import os
 import shutil
-from datetime import datetime
+import time
+from contextlib import contextmanager
 from pathlib import Path
+from datetime import datetime
+from .config import Settings
+
+@contextmanager
+def windows_file_operation(path: Path, max_retries: int = 3):
+    """Context manager para operaciones de archivo con reintentos en Windows."""
+    for attempt in range(max_retries):
+        try:
+            yield path
+            break
+        except PermissionError as e:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+        except OSError as e:
+            if hasattr(e, 'winerror') and e.winerror == 32:  # ERROR_SHARING_VIOLATION
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(0.5)
+            else:
+                raise
 
 class NetworkStorageManager:
-    def __init__(self):
-        # Ruta detectada en tus logs de C#
-        self.ruta_base = Path(r"\\10.2.1.92\FAA_divserv_admvos\CORRESPONDENCIA")
+    def __init__(self, base_path: Path | None = None):
+        self.ruta_base = base_path or Settings().network_base_path
 
-    def mover_a_archivo_final(self, ruta_origen: str | Path, subserie: str, folio: str) -> str:
+    def _construir_ruta_destino(self, subserie: str, folio: str) -> Path:
         anio = datetime.now().year
-        # Crear estructura: \\10.2.1.92\...\2026\Correspondencia_General
         subserie_clean = subserie.replace(" ", "_")
         carpeta_destino = self.ruta_base / str(anio) / subserie_clean
-        
         carpeta_destino.mkdir(parents=True, exist_ok=True)
-
-        # Nombre: CORRESPONDENCIA_GENERAL_2026_FOL-123.pdf
         nombre_final = f"{subserie_clean}_{anio}_{folio}.pdf"
-        ruta_destino = carpeta_destino / nombre_final
+        return carpeta_destino / nombre_final
 
-        # Mover físicamente
-        shutil.move(str(ruta_origen), str(ruta_destino))
-        return str(ruta_destino)
+    def mover_a_archivo_final(
+        self, 
+        ruta_origen: str | Path, 
+        subserie: str, 
+        folio: str
+    ) -> str:
+        origen = Path(ruta_origen)
+        destino = self._construir_ruta_destino(subserie, folio)
+        
+        with windows_file_operation(destino):
+            shutil.copy2(origen, destino)
+            origen.unlink()
+            
+        return str(destino)

@@ -1,6 +1,10 @@
 # src/infrastructure/document_analyzer.py
 from google import genai
 import json
+import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DocumentAnalyzerService:
     def __init__(self, api_key: str):
@@ -31,11 +35,27 @@ class DocumentAnalyzerService:
                 contents=f"{prompt}\n\nTexto del documento: {texto_documento}"
             )
             
-            # Limpiamos posibles formatos de Markdown
-            texto_json = response.text.replace('```json\n', '').replace('\n```', '').strip()
-            
-            return json.loads(texto_json)
+            return self._extraer_json(response.text)
             
         except Exception as e:
-            print(f"Error al comunicar con Gemini: {e}")
+            logger.error("Error al comunicar con Gemini: %s", e, exc_info=True)
             raise RuntimeError("Fallo al analizar el documento con IA.") from e
+
+    def _extraer_json(self, respuesta_texto: str) -> dict:
+        # Intenta parsear directamente
+        try:
+            return json.loads(respuesta_texto)
+        except json.JSONDecodeError:
+            pass
+        
+        # Busca un bloque de código JSON (con o sin etiqueta)
+        patron = r"```(?:json)?\s*([\s\S]*?)\s*```"
+        match = re.search(patron, respuesta_texto)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+        
+        # Si nada funciona, lanza una excepción clara
+        raise ValueError("No se pudo extraer JSON válido de la respuesta de la IA")

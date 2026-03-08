@@ -13,8 +13,3 @@ engine = create_engine(sqlite_url, echo=True)
 def crear_base_datos_y_tablas():
     """Equivalente a Entity Framework Update-Database / EnsureCreated"""
     SQLModel.metadata.create_all(engine)
-
-def obtener_sesion():
-    """Equivalente a inyectar el DbContext o UnitOfWork"""
-    with Session(engine) as session:
-        yield session

@@ -1,7 +1,10 @@
 # main.py
 import sys
 import os
+import logging
 from typing import Dict, Any, Optional, List
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from PySide6.QtWidgets import (
@@ -17,6 +20,7 @@ from PySide6.QtGui import QFont, QColor
 from sqlmodel import Session, select
 from src.infrastructure.database import engine, crear_base_datos_y_tablas
 from src.domain.entities import DocumentoPrincipal
+from src.domain.enums import FaseCicloVida
 from src.infrastructure.document_analyzer import DocumentAnalyzerService
 from src.infrastructure.ocr_processor import OcrProcessor
 from src.infrastructure.network_storage import NetworkStorageManager
@@ -213,24 +217,21 @@ class MainWindow(QMainWindow):
             self.cargar_datos_tabla()
 
     @Slot(object)
-    def habilitar_botones(self, fase: Optional[Any]):
+    def habilitar_botones(self, fase: Optional[FaseCicloVida]) -> None:
         """
         Modifica la disponibilidad de los controles según la fase actual del documento.
         
         Args:
             fase: Objeto enumerado (Enum) que representa la fase del ciclo de vida.
         """
-        # Verificamos si el objeto fase tiene el atributo 'value' (seguridad)
-        if not hasattr(fase, 'value'):
+        if not isinstance(fase, FaseCicloVida):
             return
-
-        fase_valor = fase.value
         
-        if fase_valor == "Ingresado":
+        if fase == FaseCicloVida.INGRESADO:
             self.btn_clasificar.setEnabled(True)
             self.btn_clasificar.setToolTip("Listo para clasificar")
             self.btn_archivar.setEnabled(False)
-        elif fase_valor == "Clasificado":
+        elif fase == FaseCicloVida.CLASIFICADO:
             self.btn_clasificar.setEnabled(False)
             self.btn_clasificar.setToolTip("El documento ya ha sido clasificado")
             self.btn_archivar.setEnabled(True)
@@ -289,8 +290,8 @@ class MainWindow(QMainWindow):
                 self.tabla.setUpdatesEnabled(True)
 
         except Exception as e:
-            print(f"Error crítico al cargar datos: {e}")
-            self.actualizar_estado(f"Error en BD: {e}")
+            logger.critical("Error crítico al cargar datos: %s", e, exc_info=True)
+            self.actualizar_estado(f"Error en BD: revise el log.")
 
     def _configurar_color_fase(self, item: QTableWidgetItem, fase: str) -> None:
         """Asigna color al item de tabla dependiendo de la fase."""

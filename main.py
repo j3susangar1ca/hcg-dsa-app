@@ -1,113 +1,156 @@
-# main.py
 import sys
 import os
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Optional, List
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from dotenv import load_dotenv
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
     QWidget, QPushButton, QLabel, QTableWidget,
     QTableWidgetItem, QHeaderView, QFrame, QSizePolicy, QSplitter
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QThread, Signal
 from PySide6.QtGui import QFont, QColor
 
-# Módulos internos
 from sqlmodel import Session, select
 from src.infrastructure.database import engine, crear_base_datos_y_tablas
 from src.domain.entities import DocumentoPrincipal
 from src.domain.enums import FaseCicloVida
+from src.domain.schemas import AnalisisDocumento
 from src.infrastructure.document_analyzer import DocumentAnalyzerService
 from src.infrastructure.ocr_processor import OcrProcessor
 from src.infrastructure.network_storage import NetworkStorageManager
 from src.presentation.documento_viewmodel import DocumentoViewModel
+from src.infrastructure.config import Settings
+from src.presentation.styles import AppStyles
+from src.presentation.templates import RESULTADO_TEMPLATE
 
+from dataclasses import dataclass
 
-# --- HOJA DE ESTILOS PROFESIONAL (QSS) ---
-# Nota: Se han eliminado propiedades no soportadas como 'transform' y 'box-shadow' complejo
-# para asegurar el renderizado correcto en todas las plataformas.
-STYLESHEET_PATH = "styles.qss"
+@dataclass(frozen=True)
+class ButtonState:
+    clasificar_enabled: bool
+    clasificar_tooltip: str
+    archivar_enabled: bool
 
+class DocumentLoader(QThread):
+    documents_loaded = Signal(list)
+    error_occurred = Signal(str)
+    
+    def __init__(self, page: int = 1, page_size: int = 100):
+        super().__init__()
+        self.page = page
+        self.page_size = page_size
+    
+    def run(self):
+        try:
+            with Session(engine) as session:
+                statement = (
+                    select(
+                        DocumentoPrincipal.folio_oficial,
+                        DocumentoPrincipal.remitente,
+                        DocumentoPrincipal.asunto,
+                        DocumentoPrincipal.fase_ciclo_vida
+                    )
+                    .order_by(DocumentoPrincipal.id.desc())
+                    .offset((self.page - 1) * self.page_size)
+                    .limit(self.page_size)
+                )
+                results = session.exec(statement).all()
+                self.documents_loaded.emit(list(results))
+        except Exception as e:
+            self.error_occurred.emit(str(e))
 
 class MainWindow(QMainWindow):
-    """
-    Ventana principal de la aplicación CADIDO - Gestión Documental Inteligente.
-    
-    Esta clase actúa como la Vista en el patrón MVVM, encargándose únicamente de 
-    la presentación de datos y captura de eventos del usuario, delegando la lógica 
-    de negocio al DocumentoViewModel.
-    """
+    FASE_CONFIG: dict[FaseCicloVida, ButtonState] = {
+        FaseCicloVida.NACIMIENTO: ButtonState(False, "Cargue un documento primero", False),
+        FaseCicloVida.INGRESADO: ButtonState(True, "Listo para clasificar", False),
+        FaseCicloVida.CLASIFICADO: ButtonState(False, "El documento ya ha sido clasificado", True),
+        FaseCicloVida.ARCHIVADO: ButtonState(False, "Documento ya archivado", False),
+        FaseCicloVida.SELLADO: ButtonState(False, "Documento sellado", False),
+        FaseCicloVida.RECHAZADO: ButtonState(False, "Documento rechazado", False),
+    }
 
-    def __init__(self, view_model: DocumentoViewModel):
+    def __init__(self, view_model: DocumentoViewModel) -> None:
         super().__init__()
         self.view_model = view_model
         
-        # Configuración inicial
         self._setup_window_properties()
-        self._setup_ui()
+        self._build_ui()
         self._connect_signals()
         self._initialize_data()
 
-    def _setup_window_properties(self):
-        """Configura las propiedades básicas de la ventana"""
+    def _setup_window_properties(self) -> None:
         self.setWindowTitle("CADIDO - Gestión Documental Inteligente")
-        self.resize(1024, 768)  # Resolución inicial más estándar
+        self.resize(1024, 768)
         self.setMinimumSize(900, 650)
 
-    def _setup_ui(self):
-        """Construye y configura todos los componentes de la interfaz gráfica."""
-        
-        # 1. Creamos el visor de PDF (Navegador ligero)
+    def _build_ui(self) -> None:
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.addWidget(self._create_left_panel())
+        self.splitter.addWidget(self._create_pdf_viewer())
+        self.setCentralWidget(self.splitter)
+        self.splitter.setSizes([400, 600])
+
+    def _create_pdf_viewer(self) -> QWebEngineView:
         self.web_view = QWebEngineView()
         self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PluginsEnabled, True)
         self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PdfViewerEnabled, True)
         self.web_view.setMinimumWidth(500)
-        
-        # 2. Usamos un QSplitter para dividir la pantalla
-        self.splitter = QSplitter(Qt.Horizontal)
-        
-        # Contenedor Izquierdo (Todo lo antiguo)
-        self.widget_izquierdo = QWidget()
-        layout_principal = QVBoxLayout(self.widget_izquierdo)
+        return self.web_view
+
+    def _create_left_panel(self) -> QWidget:
+        widget = QWidget()
+        layout_principal = QVBoxLayout(widget)
         layout_principal.setContentsMargins(30, 30, 30, 30)
         layout_principal.setSpacing(20)
 
-        # 1. Encabezado
         lbl_titulo = QLabel("Sistema de Gestión Documental CADIDO")
         lbl_titulo.setObjectName("tituloApp")
         lbl_titulo.setAlignment(Qt.AlignCenter)
         layout_principal.addWidget(lbl_titulo)
 
-        # 2. Barra de Herramientas (Botones)
+        layout_principal.addLayout(self._create_buttons_panel())
+        layout_principal.addWidget(self._create_status_panel())
+        
+        lbl_subtitulo = QLabel("📑 Documentos Procesados")
+        lbl_subtitulo.setObjectName("subtituloTabla")
+        layout_principal.addWidget(lbl_subtitulo)
+
+        self.tabla = QTableWidget(0, 4)
+        self._configure_table()
+        layout_principal.addWidget(self.tabla)
+
+        return widget
+
+    def _create_buttons_panel(self) -> QHBoxLayout:
         layout_botones = QHBoxLayout()
         layout_botones.setSpacing(15)
 
         self.btn_seleccionar = QPushButton("📄 1. Cargar PDF")
+        
         self.btn_clasificar = QPushButton("🧠 2. Clasificar con IA")
         self.btn_clasificar.setEnabled(False)
         self.btn_clasificar.setToolTip("Disponible tras cargar un documento")
 
         self.btn_archivar = QPushButton("📦 3. Archivar en Red")
         self.btn_archivar.setEnabled(False)
-        self.btn_archivar.setStyleSheet("background-color: #4B5563;") # Gris oscuro profesional
+        self.btn_archivar.setStyleSheet("background-color: #4B5563;")
 
         self.btn_consultar = QPushButton("🔄 Actualizar Tabla")
         self.btn_consultar.setObjectName("btnSecundario")
 
-        # Agrupar botones de acción a la izquierda
         layout_botones.addWidget(self.btn_seleccionar)
         layout_botones.addWidget(self.btn_clasificar)
         layout_botones.addWidget(self.btn_archivar)
-        layout_botones.addStretch()  # Empuja el siguiente botón a la derecha
+        layout_botones.addStretch()
         layout_botones.addWidget(self.btn_consultar)
-        
-        layout_principal.addLayout(layout_botones)
+        return layout_botones
 
-        # 3. Panel de Estado (Dashboard superior)
+    def _create_status_panel(self) -> QFrame:
         self.panel_estado = QFrame()
         self.panel_estado.setObjectName("panelEstado")
         self.panel_estado.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -123,72 +166,43 @@ class MainWindow(QMainWindow):
         self.lbl_resultado = QLabel("Utilice el botón 'Cargar PDF' para iniciar el análisis de un nuevo documento.")
         self.lbl_resultado.setWordWrap(True)
         self.lbl_resultado.setFont(QFont("Segoe UI", 11))
-        self.lbl_resultado.setTextFormat(Qt.RichText) # Permite HTML básico
+        self.lbl_resultado.setTextFormat(Qt.RichText)
 
         layout_estado.addWidget(self.lbl_estado)
         layout_estado.addWidget(self.lbl_resultado)
-        
-        layout_principal.addWidget(self.panel_estado)
+        return self.panel_estado
 
-        # 4. Sección de Tabla de Datos
-        lbl_subtitulo = QLabel("📑 Documentos Procesados")
-        lbl_subtitulo.setObjectName("subtituloTabla")
-        layout_principal.addWidget(lbl_subtitulo)
-
-        self.tabla = QTableWidget(0, 4)
-        self._configure_table()
-        layout_principal.addWidget(self.tabla)
-
-        # Ensamblaje final
-        self.splitter.addWidget(self.widget_izquierdo)
-        self.splitter.addWidget(self.web_view)
-        
-        # Configuramos proporciones iniciales del splitter
-        self.splitter.setSizes([400, 600])
-
-        self.setCentralWidget(self.splitter)
-
-    def _configure_table(self):
-        """Configura propiedades avanzadas de la tabla."""
+    def _configure_table(self) -> None:
         self.tabla.setHorizontalHeaderLabels(["Folio", "Remitente", "Asunto", "Fase Actual"])
-        
-        # Configuración de encabezados
         header = self.tabla.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # Folio ajustado
-        header.setSectionResizeMode(1, QHeaderView.Stretch)          # Remitente flexible
-        header.setSectionResizeMode(2, QHeaderView.Stretch)          # Asunto flexible
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Fase ajustada
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         
         self.tabla.setAlternatingRowColors(True)
         self.tabla.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectRows)
         self.tabla.setSortingEnabled(True)
         self.tabla.verticalHeader().setVisible(False)
-        self.tabla.setShowGrid(False) # Diseño más limpio, usando bordes de items
+        self.tabla.setShowGrid(False)
 
-    def _connect_signals(self):
-        """Vincula las señales de la UI y el ViewModel con sus respectivos slots."""
-        # Señales de la UI hacia el ViewModel
+    def _connect_signals(self) -> None:
         self.btn_seleccionar.clicked.connect(self.view_model.seleccionar_archivo)
         self.btn_clasificar.clicked.connect(self.view_model.clasificar_documento)
         self.btn_archivar.clicked.connect(self.ejecutar_archivado)
         self.btn_consultar.clicked.connect(self.cargar_datos_tabla)
 
-        # Señales del ViewModel hacia la UI
         self.view_model.estado_cambiado.connect(self.actualizar_estado)
         self.view_model.analisis_completado.connect(self.mostrar_resultado)
         self.view_model.fase_cambiada.connect(self.habilitar_botones)
-        
-        # 3. Conectar la señal del PDF
         self.view_model.url_pdf_cambiada.connect(self.web_view.load)
 
-    def _initialize_data(self):
-        """Carga inicial de datos necesarios para la aplicación."""
+    def _initialize_data(self) -> None:
         self.cargar_datos_tabla()
 
     @Slot()
-    def ejecutar_archivado(self):
-        # Obtenemos el folio de la fila seleccionada en la tabla
+    def ejecutar_archivado(self) -> None:
         fila_actual = self.tabla.currentRow()
         if fila_actual < 0:
             self.actualizar_estado("Por favor, selecciona un documento de la tabla primero.")
@@ -199,153 +213,93 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def actualizar_estado(self, mensaje: str) -> None:
-        """
-        Actualiza la etiqueta de estado en la interfaz.
-        
-        Args:
-            mensaje: Texto del estado proveniente del ViewModel.
-        """
         self.lbl_estado.setText(f"ℹ️ {mensaje}")
-        
-        # Si el mensaje indica éxito, refrescamosos la tabla automáticamente
         if "¡Éxito!" in mensaje:
             self.cargar_datos_tabla()
 
-    @Slot(object)
+    @Slot(FaseCicloVida)
     def habilitar_botones(self, fase: Optional[FaseCicloVida]) -> None:
-        """
-        Modifica la disponibilidad de los controles según la fase actual del documento.
-        
-        Args:
-            fase: Objeto enumerado (Enum) que representa la fase del ciclo de vida.
-        """
-        if not isinstance(fase, FaseCicloVida):
+        if fase is None:
             return
+            
+        config = self.FASE_CONFIG.get(fase, ButtonState(False, "", False))
         
-        if fase == FaseCicloVida.INGRESADO:
-            self.btn_clasificar.setEnabled(True)
-            self.btn_clasificar.setToolTip("Listo para clasificar")
-            self.btn_archivar.setEnabled(False)
-        elif fase == FaseCicloVida.CLASIFICADO:
-            self.btn_clasificar.setEnabled(False)
-            self.btn_clasificar.setToolTip("El documento ya ha sido clasificado")
-            self.btn_archivar.setEnabled(True)
+        self.btn_clasificar.setEnabled(config.clasificar_enabled)
+        self.btn_clasificar.setToolTip(config.clasificar_tooltip)
+        self.btn_archivar.setEnabled(config.archivar_enabled)
 
-    @Slot(dict)
-    def mostrar_resultado(self, datos: Dict[str, Any]):
-        """
-        Renderiza los resultados del análisis de IA en el panel de estado.
-        
-        Args:
-            datos: Diccionario con claves 'remitente', 'asunto', 'estatus_sugerido'.
-        """
-        html_template = (
-            f"<div style='line-height: 1.6;'>"
-            f"<b>🏢 Remitente:</b> {datos.get('remitente', 'No identificado')}<br><br>"
-            f"<b>📝 Asunto:</b> {datos.get('asunto', 'No identificado')}<br><br>"
-            f"<b>🎯 Acción sugerida:</b> "
-            f"<span style='color: #2563EB; font-weight:bold; font-size: 13px;'>"
-            f"{datos.get('estatus_sugerido', 'Pendiente')}</span>"
-            f"</div>"
+    @Slot(object)
+    def mostrar_resultado(self, datos: AnalisisDocumento) -> None:
+        html = RESULTADO_TEMPLATE.safe_substitute(
+            remitente=datos.remitente,
+            asunto=datos.asunto,
+            estatus=datos.estatus_sugerido
         )
-        self.lbl_resultado.setText(html_template)
+        self.lbl_resultado.setText(html)
 
     @Slot()
-    def cargar_datos_tabla(self):
-        """
-        Consulta la base de datos y pobla el QTableWidget con los registros.
-        Utiliza transacción segura y optimiza la renderización bloqueando señales.
-        """
-        try:
-            with Session(engine) as session:
-                statement = select(DocumentoPrincipal).order_by(DocumentoPrincipal.id.desc())
-                documentos: List[DocumentoPrincipal] = session.exec(statement).all()
+    def cargar_datos_tabla(self) -> None:
+        self.loader = DocumentLoader(page=1, page_size=100)
+        self.loader.documents_loaded.connect(self._populate_table)
+        self.loader.error_occurred.connect(lambda e: self.actualizar_estado(f"Error en BD: revise el log. {e}"))
+        self.loader.start()
 
-                # Optimización: Bloquear repaints mientras se llena la tabla
-                self.tabla.setUpdatesEnabled(False)
-                self.tabla.setRowCount(len(documentos))
+    def _populate_table(self, documentos: list) -> None:
+        self.tabla.setUpdatesEnabled(False)
+        self.tabla.setRowCount(len(documentos))
 
-                for row, doc in enumerate(documentos):
-                    # Crear items alineados y formateados
-                    item_folio = self._create_table_item(doc.folio_oficial or "Sin Folio", Qt.AlignCenter)
-                    item_remitente = self._create_table_item(doc.remitente or "Desconocido")
-                    item_asunto = self._create_table_item(doc.asunto or "Sin Asunto")
-                    
-                    # Lógica de color para la fase
-                    fase_texto = doc.fase_ciclo_vida.value if doc.fase_ciclo_vida else "N/A"
-                    item_fase = self._create_table_item(fase_texto, Qt.AlignCenter)
-                    self._configurar_color_fase(item_fase, fase_texto)
+        for row, doc_tuple in enumerate(documentos):
+            folio_oficial, remitente, asunto, fase_ciclo_vida = doc_tuple
+            item_folio = self._create_table_item(folio_oficial or "Sin Folio", Qt.AlignCenter)
+            item_remitente = self._create_table_item(remitente or "Desconocido")
+            item_asunto = self._create_table_item(asunto or "Sin Asunto")
+            
+            fase_texto = fase_ciclo_vida.value if fase_ciclo_vida else "N/A"
+            item_fase = self._create_table_item(fase_texto, Qt.AlignCenter)
+            self._configurar_color_fase(item_fase, fase_texto)
 
-                    # Asignar items a la fila
-                    self.tabla.setItem(row, 0, item_folio)
-                    self.tabla.setItem(row, 1, item_remitente)
-                    self.tabla.setItem(row, 2, item_asunto)
-                    self.tabla.setItem(row, 3, item_fase)
+            self.tabla.setItem(row, 0, item_folio)
+            self.tabla.setItem(row, 1, item_remitente)
+            self.tabla.setItem(row, 2, item_asunto)
+            self.tabla.setItem(row, 3, item_fase)
 
-                self.tabla.setUpdatesEnabled(True)
-
-        except Exception as e:
-            logger.critical("Error crítico al cargar datos: %s", e, exc_info=True)
-            self.actualizar_estado(f"Error en BD: revise el log.")
+        self.tabla.setUpdatesEnabled(True)
 
     def _configurar_color_fase(self, item: QTableWidgetItem, fase: str) -> None:
-        """Asigna color al item de tabla dependiendo de la fase."""
         if fase == "Clasificado":
-            item.setForeground(QColor("#059669")) # Verde oscuro
+            item.setForeground(QColor("#059669"))
             item.setFont(QFont("Segoe UI", -1, QFont.Bold))
         else:
-            item.setForeground(QColor("#6B7280")) # Gris
+            item.setForeground(QColor("#6B7280"))
 
     def _create_table_item(self, text: str, alignment: int = Qt.AlignLeft | Qt.AlignVCenter) -> QTableWidgetItem:
-        """
-        Factory method para crear items de tabla con formato estándar.
-        
-        Args:
-            text: Contenido textual de la celda.
-            alignment: Banderas de alineación de Qt.
-            
-        Returns:
-            QTableWidgetItem configurado.
-        """
         item = QTableWidgetItem(text)
         item.setTextAlignment(alignment)
-        item.setFlags(item.flags() & ~Qt.ItemIsEditable) # Asegurar no editable
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         return item
 
 
 def main():
-    """Punto de entrada principal de la aplicación."""
-    # Cargar variables de entorno
-    load_dotenv()
+    try:
+        settings = Settings()
+    except Exception as e:
+        logger.error(f"Error de configuración: {e}")
+        sys.exit(1)
 
-    # Inicializar infraestructura
     crear_base_datos_y_tablas()
 
-    # Validar configuración crítica
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise EnvironmentError("Error de configuración: GEMINI_API_KEY no está definida en el archivo .env")
-
-    # Inyección de dependencias
-    analyzer = DocumentAnalyzerService(api_key)
+    # Inyección de dependencias con configuración tipada
+    storage = NetworkStorageManager(settings.network_base_path)
+    analyzer = DocumentAnalyzerService(api_key=settings.gemini_api_key)
     ocr = OcrProcessor()
-    storage = NetworkStorageManager()
     view_model = DocumentoViewModel(analyzer, ocr, storage)
 
-    # Inicializar aplicación Qt
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     
-    # Configuración global de la app (opcional, para alta DPI)
-    app.setStyle("Fusion") # Fusion suele renderizar mejor los QSS modernos
+    stylesheet = AppStyles.load_main_window_style(Path("styles.qss"))
+    app.setStyleSheet(stylesheet)
     
-    # Aplicar estilo globalmente a toda la aplicación
-    try:
-        with open(STYLESHEET_PATH, "r", encoding="utf-8") as f:
-            app.setStyleSheet(f.read())
-    except Exception as e:
-        logger.error("Error al cargar la hoja de estilos: %s", e)
-    
-    # Instanciar y mostrar ventana principal
     window = MainWindow(view_model)
     window.show()
 

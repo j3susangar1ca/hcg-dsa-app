@@ -34,10 +34,15 @@ class DocumentoPrincipal(SQLModel, table=True):
     # Relación para acceder al catálogo fácilmente
     catalogo: Optional[CatalogoCadido] = Relationship(back_populates="documentos")
 
+from zoneinfo import ZoneInfo
+
+def get_mexico_time() -> datetime:
+    return datetime.now(ZoneInfo("America/Mexico_City"))
+
 class BitacoraTrazabilidad(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     documento_id: UUID = Field(foreign_key="documentoprincipal.id")
     fase_anterior: str = Field(max_length=50)
     fase_nueva: str = Field(max_length=50)
-    fecha_transaccion: datetime = Field(default_factory=datetime.utcnow)
+    fecha_transaccion: datetime = Field(default_factory=get_mexico_time)
     descripcion_evento: str = Field(max_length=1000)

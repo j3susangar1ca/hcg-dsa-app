@@ -7,8 +7,9 @@ from dotenv import load_dotenv
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
     QWidget, QPushButton, QLabel, QTableWidget,
-    QTableWidgetItem, QHeaderView, QFrame, QSizePolicy
+    QTableWidgetItem, QHeaderView, QFrame, QSizePolicy, QSplitter
 )
+from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QFont, QColor
 
@@ -189,8 +190,19 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Construye y configura todos los componentes de la interfaz gráfica."""
-        # Layout Principal con márgenes generosos
-        layout_principal = QVBoxLayout()
+        
+        # 1. Creamos el visor de PDF (Navegador ligero)
+        self.web_view = QWebEngineView()
+        self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PluginsEnabled, True)
+        self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PdfViewerEnabled, True)
+        self.web_view.setMinimumWidth(500)
+        
+        # 2. Usamos un QSplitter para dividir la pantalla
+        self.splitter = QSplitter(Qt.Horizontal)
+        
+        # Contenedor Izquierdo (Todo lo antiguo)
+        self.widget_izquierdo = QWidget()
+        layout_principal = QVBoxLayout(self.widget_izquierdo)
         layout_principal.setContentsMargins(30, 30, 30, 30)
         layout_principal.setSpacing(20)
 
@@ -257,10 +269,14 @@ class MainWindow(QMainWindow):
         self._configure_table()
         layout_principal.addWidget(self.tabla)
 
-        # Contenedor Central
-        container = QWidget()
-        container.setLayout(layout_principal)
-        self.setCentralWidget(container)
+        # Ensamblaje final
+        self.splitter.addWidget(self.widget_izquierdo)
+        self.splitter.addWidget(self.web_view)
+        
+        # Configuramos proporciones iniciales del splitter
+        self.splitter.setSizes([400, 600])
+
+        self.setCentralWidget(self.splitter)
 
     def _configure_table(self):
         """Configura propiedades avanzadas de la tabla."""
@@ -292,6 +308,9 @@ class MainWindow(QMainWindow):
         self.view_model.estado_cambiado.connect(self.actualizar_estado)
         self.view_model.analisis_completado.connect(self.mostrar_resultado)
         self.view_model.fase_cambiada.connect(self.habilitar_botones)
+        
+        # 3. Conectar la señal del PDF
+        self.view_model.url_pdf_cambiada.connect(self.web_view.load)
 
     def _initialize_data(self):
         """Carga inicial de datos necesarios para la aplicación."""

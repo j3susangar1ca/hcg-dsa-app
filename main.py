@@ -26,140 +26,7 @@ from src.presentation.documento_viewmodel import DocumentoViewModel
 # --- HOJA DE ESTILOS PROFESIONAL (QSS) ---
 # Nota: Se han eliminado propiedades no soportadas como 'transform' y 'box-shadow' complejo
 # para asegurar el renderizado correcto en todas las plataformas.
-ESTILO_MODERNO = """
-/* --- Ventana Principal --- */
-QMainWindow {
-    background-color: #F3F4F6;
-}
-
-/* --- Etiquetas Generales --- */
-QLabel {
-    font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
-    color: #1F2937;
-    font-size: 14px;
-}
-
-/* Título principal */
-QLabel#tituloApp {
-    font-size: 28px;
-    font-weight: bold;
-    color: #111827;
-    padding: 10px;
-}
-
-/* Subtítulo de sección */
-QLabel#subtituloTabla {
-    font-size: 16px;
-    font-weight: bold;
-    color: #374151;
-    margin-top: 15px;
-    margin-bottom: 5px;
-}
-
-/* Panel de estado */
-QFrame#panelEstado {
-    background-color: #FFFFFF;
-    border-radius: 10px;
-    border: 1px solid #E5E7EB;
-    min-height: 100px;
-}
-
-/* --- Botones --- */
-QPushButton {
-    background-color: #2563EB;
-    color: white;
-    border: none;
-    padding: 12px 24px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 14px;
-    text-align: center;
-    min-width: 160px;
-    min-height: 45px;
-}
-
-QPushButton:hover {
-    background-color: #1D4ED8;
-    border: 1px solid #1E40AF;
-}
-
-QPushButton:pressed {
-    background-color: #1E40AF;
-    padding-top: 13px; /* Efecto de presión visual */
-    padding-bottom: 11px;
-}
-
-QPushButton:disabled {
-    background-color: #E5E7EB;
-    color: #9CA3AF;
-    border: none;
-}
-
-/* Botón secundario (Consultar/Actualizar) */
-QPushButton#btnSecundario {
-    background-color: #10B981;
-}
-
-QPushButton#btnSecundario:hover {
-    background-color: #059669;
-    border: 1px solid #047857;
-}
-
-QPushButton#btnSecundario:pressed {
-    background-color: #047857;
-}
-
-/* --- Tabla de Datos --- */
-QTableWidget {
-    background-color: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    gridline-color: #F3F4F6;
-    selection-background-color: #DBEAFE;
-    selection-color: #1E3A8A;
-    font-size: 13px;
-    outline: none; /* Elimina el borde de selección de celda */
-}
-
-QTableWidget::item {
-    padding: 8px;
-    border-bottom: 1px solid #E5E7EB;
-}
-
-QTableWidget::item:selected {
-    background-color: #EFF6FF;
-    color: #1E40AF;
-}
-
-QHeaderView::section {
-    background-color: #F9FAFB;
-    color: #4B5563;
-    padding: 12px 8px;
-    border: none;
-    border-bottom: 2px solid #E5E7EB;
-    font-weight: bold;
-    font-size: 13px;
-    text-transform: uppercase;
-}
-
-QTableCornerButton::section {
-    background-color: #F9FAFB;
-    border: none;
-    border-right: 1px solid #E5E7EB;
-    border-bottom: 2px solid #E5E7EB;
-}
-
-/* Etiquetas de estado específicas */
-QLabel#estadoActivo {
-    color: #059669;
-    font-weight: bold;
-}
-
-QLabel#estadoInactivo {
-    color: #DC2626;
-    font-weight: bold;
-}
-"""
+STYLESHEET_PATH = "styles.qss"
 
 
 class MainWindow(QMainWindow):
@@ -186,7 +53,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("CADIDO - Gestión Documental Inteligente")
         self.resize(1024, 768)  # Resolución inicial más estándar
         self.setMinimumSize(900, 650)
-        self.setStyleSheet(ESTILO_MODERNO)
+        try:
+            with open(STYLESHEET_PATH, "r", encoding="utf-8") as f:
+                self.setStyleSheet(f.read())
+        except Exception as e:
+            print(f"Error al cargar la hoja de estilos: {e}")
 
     def _setup_ui(self):
         """Construye y configura todos los componentes de la interfaz gráfica."""
@@ -328,7 +199,7 @@ class MainWindow(QMainWindow):
         self.view_model.archivar_documento(folio)
 
     @Slot(str)
-    def actualizar_estado(self, mensaje: str):
+    def actualizar_estado(self, mensaje: str) -> None:
         """
         Actualiza la etiqueta de estado en la interfaz.
         
@@ -407,12 +278,7 @@ class MainWindow(QMainWindow):
                     # Lógica de color para la fase
                     fase_texto = doc.fase_ciclo_vida.value if doc.fase_ciclo_vida else "N/A"
                     item_fase = self._create_table_item(fase_texto, Qt.AlignCenter)
-                    
-                    if fase_texto == "Clasificado":
-                        item_fase.setForeground(QColor("#059669")) # Verde oscuro
-                        item_fase.setFont(QFont("Segoe UI", -1, QFont.Bold))
-                    else:
-                        item_fase.setForeground(QColor("#6B7280")) # Gris
+                    self._configurar_color_fase(item_fase, fase_texto)
 
                     # Asignar items a la fila
                     self.tabla.setItem(row, 0, item_folio)
@@ -424,7 +290,15 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             print(f"Error crítico al cargar datos: {e}")
-            # Opcional: Mostrar mensaje en la barra de estado si existiera
+            self.actualizar_estado(f"Error en BD: {e}")
+
+    def _configurar_color_fase(self, item: QTableWidgetItem, fase: str) -> None:
+        """Asigna color al item de tabla dependiendo de la fase."""
+        if fase == "Clasificado":
+            item.setForeground(QColor("#059669")) # Verde oscuro
+            item.setFont(QFont("Segoe UI", -1, QFont.Bold))
+        else:
+            item.setForeground(QColor("#6B7280")) # Gris
 
     def _create_table_item(self, text: str, alignment: int = Qt.AlignLeft | Qt.AlignVCenter) -> QTableWidgetItem:
         """

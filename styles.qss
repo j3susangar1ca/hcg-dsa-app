@@ -1,0 +1,132 @@
+/* --- Ventana Principal --- */
+QMainWindow {
+    background-color: #F3F4F6;
+}
+
+/* --- Etiquetas Generales --- */
+QLabel {
+    font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1F2937;
+    font-size: 14px;
+}
+
+/* Título principal */
+QLabel#tituloApp {
+    font-size: 28px;
+    font-weight: bold;
+    color: #111827;
+    padding: 10px;
+}
+
+/* Subtítulo de sección */
+QLabel#subtituloTabla {
+    font-size: 16px;
+    font-weight: bold;
+    color: #374151;
+    margin-top: 15px;
+    margin-bottom: 5px;
+}
+
+/* Panel de estado */
+QFrame#panelEstado {
+    background-color: #FFFFFF;
+    border-radius: 10px;
+    border: 1px solid #E5E7EB;
+    min-height: 100px;
+}
+
+/* --- Botones --- */
+QPushButton {
+    background-color: #2563EB;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 14px;
+    text-align: center;
+    min-width: 160px;
+    min-height: 45px;
+}
+
+QPushButton:hover {
+    background-color: #1D4ED8;
+    border: 1px solid #1E40AF;
+}
+
+QPushButton:pressed {
+    background-color: #1E40AF;
+    padding-top: 13px; /* Efecto de presión visual */
+    padding-bottom: 11px;
+}
+
+QPushButton:disabled {
+    background-color: #E5E7EB;
+    color: #9CA3AF;
+    border: none;
+}
+
+/* Botón secundario (Consultar/Actualizar) */
+QPushButton#btnSecundario {
+    background-color: #10B981;
+}
+
+QPushButton#btnSecundario:hover {
+    background-color: #059669;
+    border: 1px solid #047857;
+}
+
+QPushButton#btnSecundario:pressed {
+    background-color: #047857;
+}
+
+/* --- Tabla de Datos --- */
+QTableWidget {
+    background-color: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    gridline-color: #F3F4F6;
+    selection-background-color: #DBEAFE;
+    selection-color: #1E3A8A;
+    font-size: 13px;
+    outline: none; /* Elimina el borde de selección de celda */
+}
+
+QTableWidget::item {
+    padding: 8px;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+QTableWidget::item:selected {
+    background-color: #EFF6FF;
+    color: #1E40AF;
+}
+
+QHeaderView::section {
+    background-color: #F9FAFB;
+    color: #4B5563;
+    padding: 12px 8px;
+    border: none;
+    border-bottom: 2px solid #E5E7EB;
+    font-weight: bold;
+    font-size: 13px;
+    text-transform: uppercase;
+}
+
+QTableCornerButton::section {
+    background-color: #F9FAFB;
+    border: none;
+    border-right: 1px solid #E5E7EB;
+    border-bottom: 2px solid #E5E7EB;
+}
+
+/* Etiquetas de estado específicas */
+QLabel#estadoActivo {
+    color: #059669;
+    font-weight: bold;
+}
+
+QLabel#estadoInactivo {
+    color: #DC2626;
+    font-weight: bold;
+}

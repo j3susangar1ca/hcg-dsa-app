@@ -118,32 +118,18 @@ class DocumentoViewModel(QObject):
             self.estado_cambiado.emit(f"Error al persistir en BD: {str(e)}")
 
     @Slot(str)
-    def archivar_documento(self, folio_buscado):
-        """Mueve el archivo físicamente y actualiza la BD"""
+    def archivar_documento(self, folio):
         try:
             with Session(engine) as session:
-                # 1. Buscar el documento en la BD
-                statement = select(DocumentoPrincipal).where(DocumentoPrincipal.folio_oficial == folio_buscado)
+                statement = select(DocumentoPrincipal).where(DocumentoPrincipal.folio_oficial == folio)
                 doc = session.exec(statement).first()
-
                 if not doc:
                     self.estado_cambiado.emit("Error: No se encontró el registro en la BD.")
                     return
-
-                self.estado_cambiado.emit(f"Archivando documento {doc.folio_oficial}...")
-
-                # 2. Mover archivo físico
-                anio_actual = datetime.now().year
-                subserie_defecto = "CORRESPONDENCIA_GENERAL" # Esto vendrá del catálogo después
+                # 1. Mover archivo físico usando el servicio inyectado
+                nueva_ruta = self._storage.mover_a_archivo_final(doc.ruta_red_actual, "CORRESPONDENCIA_GENERAL", doc.folio_oficial)
                 
-                nueva_ruta = self._storage.mover_a_definitivo(
-                    doc.ruta_red_actual, 
-                    subserie_defecto, 
-                    anio_actual, 
-                    doc.folio_oficial
-                )
-
-                # 3. Actualizar registro y Bitácora
+                # 2. Actualizar BD y Bitácora
                 fase_anterior = doc.fase_ciclo_vida
                 doc.fase_ciclo_vida = FaseCicloVida.ARCHIVADO
                 doc.ruta_red_actual = nueva_ruta
@@ -154,14 +140,12 @@ class DocumentoViewModel(QObject):
                     fase_nueva=FaseCicloVida.ARCHIVADO.value,
                     descripcion_evento=f"Archivo movido físicamente a red: {nueva_ruta}"
                 )
-                
                 session.add(doc)
                 session.add(bitacora)
                 session.commit()
-
-                self.estado_cambiado.emit(f"¡Éxito! Documento {doc.folio_oficial} archivado correctamente.")
-                self.fase_cambiada.emit(FaseCicloVida.ARCHIVADO)
+                
+                self.estado_cambiado.emit(f"¡Éxito! Archivo movido a red: {nueva_ruta}")
+                self.fase_cambiada.emit(doc.fase_ciclo_vida)
                 self.archivo_movido.emit(nueva_ruta)
-
         except Exception as e:
             self.estado_cambiado.emit(f"Error al archivar: {str(e)}")

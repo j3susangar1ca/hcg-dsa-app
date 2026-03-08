@@ -18,6 +18,7 @@ from src.infrastructure.database import engine, crear_base_datos_y_tablas
 from src.domain.entities import DocumentoPrincipal
 from src.infrastructure.document_analyzer import DocumentAnalyzerService
 from src.infrastructure.ocr_processor import OcrProcessor
+from src.infrastructure.network_storage import NetworkStorageManager
 from src.presentation.documento_viewmodel import DocumentoViewModel
 
 
@@ -208,12 +209,17 @@ class MainWindow(QMainWindow):
         self.btn_clasificar.setEnabled(False)
         self.btn_clasificar.setToolTip("Disponible tras cargar un documento")
 
+        self.btn_archivar = QPushButton("📦 3. Archivar en Red")
+        self.btn_archivar.setEnabled(False)
+        self.btn_archivar.setStyleSheet("background-color: #4B5563;") # Gris oscuro profesional
+
         self.btn_consultar = QPushButton("🔄 Actualizar Tabla")
         self.btn_consultar.setObjectName("btnSecundario")
 
         # Agrupar botones de acción a la izquierda
         layout_botones.addWidget(self.btn_seleccionar)
         layout_botones.addWidget(self.btn_clasificar)
+        layout_botones.addWidget(self.btn_archivar)
         layout_botones.addStretch()  # Empuja el siguiente botón a la derecha
         layout_botones.addWidget(self.btn_consultar)
         
@@ -279,6 +285,7 @@ class MainWindow(QMainWindow):
         # Señales de la UI hacia el ViewModel
         self.btn_seleccionar.clicked.connect(self.view_model.seleccionar_archivo)
         self.btn_clasificar.clicked.connect(self.view_model.clasificar_documento)
+        self.btn_archivar.clicked.connect(self.ejecutar_archivado)
         self.btn_consultar.clicked.connect(self.cargar_datos_tabla)
 
         # Señales del ViewModel hacia la UI
@@ -289,6 +296,17 @@ class MainWindow(QMainWindow):
     def _initialize_data(self):
         """Carga inicial de datos necesarios para la aplicación."""
         self.cargar_datos_tabla()
+
+    @Slot()
+    def ejecutar_archivado(self):
+        # Obtenemos el folio de la fila seleccionada en la tabla
+        fila_actual = self.tabla.currentRow()
+        if fila_actual < 0:
+            self.actualizar_estado("Por favor, selecciona un documento de la tabla primero.")
+            return
+
+        folio = self.tabla.item(fila_actual, 0).text()
+        self.view_model.archivar_documento(folio)
 
     @Slot(str)
     def actualizar_estado(self, mensaje: str):
@@ -321,9 +339,11 @@ class MainWindow(QMainWindow):
         if fase_valor == "Ingresado":
             self.btn_clasificar.setEnabled(True)
             self.btn_clasificar.setToolTip("Listo para clasificar")
+            self.btn_archivar.setEnabled(False)
         elif fase_valor == "Clasificado":
             self.btn_clasificar.setEnabled(False)
             self.btn_clasificar.setToolTip("El documento ya ha sido clasificado")
+            self.btn_archivar.setEnabled(True)
 
     @Slot(dict)
     def mostrar_resultado(self, datos: Dict[str, Any]):
@@ -420,7 +440,8 @@ def main():
     # Inyección de dependencias
     analyzer = DocumentAnalyzerService(api_key)
     ocr = OcrProcessor()
-    view_model = DocumentoViewModel(analyzer, ocr)
+    storage = NetworkStorageManager()
+    view_model = DocumentoViewModel(analyzer, ocr, storage)
 
     # Inicializar aplicación Qt
     app = QApplication(sys.argv)

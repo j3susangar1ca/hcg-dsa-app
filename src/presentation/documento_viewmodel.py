@@ -1,4 +1,5 @@
 # src/presentation/documento_viewmodel.py
+import random
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QFileDialog
 from src.domain.enums import FaseCicloVida
@@ -57,8 +58,12 @@ class DocumentoViewModel(QObject):
             # PLAN B: Si Google da error 429, usamos datos simulados para no bloquear el desarrollo
             print(f"Usando IA Simulada debido a: {e}")
             self.estado_cambiado.emit("Advertencia: Se usó IA simulada (Límite de API).")
+            
+            # GENERAMOS UN FOLIO ÚNICO PARA QUE NO FALLE LA BASE DE DATOS
+            folio_random = f"FOL-SIM-{random.randint(1000, 9999)}"
+            
             resultado_ia = {
-                "folio": "FOL-SIMULADO-01",
+                "folio": folio_random,
                 "remitente": "Remitente Extraído (Simulado)",
                 "asunto": "Asunto detectado (Simulado)",
                 "es_urgente": False,

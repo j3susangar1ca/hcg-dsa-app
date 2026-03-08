@@ -57,11 +57,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("CADIDO - Gestión Documental Inteligente")
         self.resize(1024, 768)  # Resolución inicial más estándar
         self.setMinimumSize(900, 650)
-        try:
-            with open(STYLESHEET_PATH, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        except Exception as e:
-            print(f"Error al cargar la hoja de estilos: {e}")
 
     def _setup_ui(self):
         """Construye y configura todos los componentes de la interfaz gráfica."""
@@ -342,6 +337,13 @@ def main():
     
     # Configuración global de la app (opcional, para alta DPI)
     app.setStyle("Fusion") # Fusion suele renderizar mejor los QSS modernos
+    
+    # Aplicar estilo globalmente a toda la aplicación
+    try:
+        with open(STYLESHEET_PATH, "r", encoding="utf-8") as f:
+            app.setStyleSheet(f.read())
+    except Exception as e:
+        logger.error("Error al cargar la hoja de estilos: %s", e)
     
     # Instanciar y mostrar ventana principal
     window = MainWindow(view_model)

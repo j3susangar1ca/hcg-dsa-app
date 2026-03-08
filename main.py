@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from src.infrastructure.database import crear_base_datos_y_tablas
 from src.infrastructure.document_analyzer import DocumentAnalyzerService
 from src.infrastructure.ocr_processor import OcrProcessor
+from src.infrastructure.network_storage import NetworkStorageManager
 from src.presentation.documento_viewmodel import DocumentoViewModel
 
 # --- HOJA DE ESTILOS MODERNOS (QSS) ---
@@ -118,11 +119,16 @@ class MainWindow(QMainWindow):
         self.btn_clasificar = QPushButton("🧠 2. Clasificar con IA")
         self.btn_clasificar.setEnabled(False)
         
+        self.btn_archivar = QPushButton("📦 3. Archivar")
+        self.btn_archivar.setEnabled(False)
+        self.btn_archivar.setStyleSheet("background-color: #4B5563;") # Gris oscuro
+        
         self.btn_consultar = QPushButton("🔄 Actualizar Tabla")
         self.btn_consultar.setObjectName("btnSecundario") # Aplicamos el estilo verde
         
         layout_botones.addWidget(self.btn_seleccionar)
         layout_botones.addWidget(self.btn_clasificar)
+        layout_botones.addWidget(self.btn_archivar)
         layout_botones.addStretch() # Empuja los botones a la izquierda
         layout_botones.addWidget(self.btn_consultar)
         
@@ -163,6 +169,7 @@ class MainWindow(QMainWindow):
         # Conexiones (Señales y Slots)
         self.btn_seleccionar.clicked.connect(self.view_model.seleccionar_archivo)
         self.btn_clasificar.clicked.connect(self.view_model.clasificar_documento)
+        self.btn_archivar.clicked.connect(self.ejecutar_archivado)
         self.btn_consultar.clicked.connect(self.cargar_datos_tabla)
 
         self.view_model.estado_cambiado.connect(self.actualizar_estado)
@@ -173,6 +180,15 @@ class MainWindow(QMainWindow):
         self.cargar_datos_tabla()
 
     # --- Métodos de la UI ---
+    def ejecutar_archivado(self):
+        # Obtenemos el folio de la fila seleccionada en la tabla
+        fila_actual = self.tabla.currentRow()
+        if fila_actual < 0:
+            self.actualizar_estado("Por favor, selecciona un documento de la tabla primero.")
+            return
+            
+        folio = self.tabla.item(fila_actual, 0).text()
+        self.view_model.archivar_documento(folio)
     def actualizar_estado(self, mensaje):
         self.lbl_estado.setText(f"ℹ️ {mensaje}")
         if "¡Éxito!" in mensaje:
@@ -181,8 +197,10 @@ class MainWindow(QMainWindow):
     def habilitar_botones(self, fase):
         if fase.value == "Ingresado":
             self.btn_clasificar.setEnabled(True)
+            self.btn_archivar.setEnabled(False)
         elif fase.value == "Clasificado":
             self.btn_clasificar.setEnabled(False)
+            self.btn_archivar.setEnabled(True)
 
     def mostrar_resultado(self, datos: dict):
         texto = f"<b>🏢 Remitente:</b> {datos.get('remitente')}<br><br>" \
@@ -220,8 +238,9 @@ if __name__ == "__main__":
     api_key = os.getenv("GEMINI_API_KEY") 
     analyzer = DocumentAnalyzerService(api_key)
     ocr = OcrProcessor()
+    storage = NetworkStorageManager()
     
-    view_model = DocumentoViewModel(analyzer, ocr)
+    view_model = DocumentoViewModel(analyzer, ocr, storage)
     
     app = QApplication(sys.argv)
     

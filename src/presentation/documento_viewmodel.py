@@ -9,17 +9,22 @@ from src.infrastructure.crypto_sealer import CryptoSealer # Importar
 from sqlmodel import Session
 from src.infrastructure.database import engine
 from src.domain.entities import DocumentoPrincipal, BitacoraTrazabilidad
+from src.infrastructure.network_storage import NetworkStorageManager
+from datetime import datetime
+from sqlmodel import Session, select
 
 class DocumentoViewModel(QObject):
     fase_cambiada = Signal(FaseCicloVida)
     estado_cambiado = Signal(str)
     analisis_completado = Signal(dict)
     archivo_seleccionado = Signal(str)
+    archivo_movido = Signal(str)
 
-    def __init__(self, analyzer_service: DocumentAnalyzerService, ocr_processor: OcrProcessor):
+    def __init__(self, analyzer_service: DocumentAnalyzerService, ocr_processor: OcrProcessor, storage: NetworkStorageManager):
         super().__init__()
         self._analyzer_service = analyzer_service
         self._ocr_processor = ocr_processor
+        self._storage = storage
         self.fase_actual = FaseCicloVida.NACIMIENTO
         self.texto_ocr = ""
         self.ruta_archivo = ""
@@ -110,4 +115,53 @@ class DocumentoViewModel(QObject):
                 session.commit()
                 self.estado_cambiado.emit(f"¡Éxito! Documento guardado en BD con ID: {nuevo_doc.id}")
         except Exception as e:
-            self.estado_cambiado.emit(f"Error al persistir en BD: {str(e)}")
+            self.estado_cambiado.emit(f"Error al persistir en BD: {str(e)}")
+
+    @Slot(str)
+    def archivar_documento(self, folio_buscado):
+        """Mueve el archivo físicamente y actualiza la BD"""
+        try:
+            with Session(engine) as session:
+                # 1. Buscar el documento en la BD
+                statement = select(DocumentoPrincipal).where(DocumentoPrincipal.folio_oficial == folio_buscado)
+                doc = session.exec(statement).first()
+
+                if not doc:
+                    self.estado_cambiado.emit("Error: No se encontró el registro en la BD.")
+                    return
+
+                self.estado_cambiado.emit(f"Archivando documento {doc.folio_oficial}...")
+
+                # 2. Mover archivo físico
+                anio_actual = datetime.now().year
+                subserie_defecto = "CORRESPONDENCIA_GENERAL" # Esto vendrá del catálogo después
+                
+                nueva_ruta = self._storage.mover_a_definitivo(
+                    doc.ruta_red_actual, 
+                    subserie_defecto, 
+                    anio_actual, 
+                    doc.folio_oficial
+                )
+
+                # 3. Actualizar registro y Bitácora
+                fase_anterior = doc.fase_ciclo_vida
+                doc.fase_ciclo_vida = FaseCicloVida.ARCHIVADO
+                doc.ruta_red_actual = nueva_ruta
+                
+                bitacora = BitacoraTrazabilidad(
+                    documento_id=doc.id,
+                    fase_anterior=fase_anterior.value,
+                    fase_nueva=FaseCicloVida.ARCHIVADO.value,
+                    descripcion_evento=f"Archivo movido físicamente a red: {nueva_ruta}"
+                )
+                
+                session.add(doc)
+                session.add(bitacora)
+                session.commit()
+
+                self.estado_cambiado.emit(f"¡Éxito! Documento {doc.folio_oficial} archivado correctamente.")
+                self.fase_cambiada.emit(FaseCicloVida.ARCHIVADO)
+                self.archivo_movido.emit(nueva_ruta)
+
+        except Exception as e:
+            self.estado_cambiado.emit(f"Error al archivar: {str(e)}")

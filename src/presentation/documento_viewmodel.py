@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QFileDialog
 from src.domain.enums import FaseCicloVida
 from src.infrastructure.document_analyzer import DocumentAnalyzerService
 from src.infrastructure.ocr_processor import OcrProcessor # Importamos el OCR
+from src.infrastructure.crypto_sealer import CryptoSealer # Importar
 from sqlmodel import Session
 from src.infrastructure.database import engine
 from src.domain.entities import DocumentoPrincipal, BitacoraTrazabilidad
@@ -83,7 +84,7 @@ class DocumentoViewModel(QObject):
                     remitente=datos_ia.get("remitente"),
                     asunto=datos_ia.get("asunto"),
                     ruta_red_actual=self.ruta_archivo,
-                    hash_criptografico="HASH_PENDIENTE", # Aquí llamarías a CryptoSealer
+                    hash_criptografico=CryptoSealer.generar_hash_sha256(self.ruta_archivo),
                     is_urgente=datos_ia.get("es_urgente", False),
                     fase_ciclo_vida=FaseCicloVida.CLASIFICADO
                 )

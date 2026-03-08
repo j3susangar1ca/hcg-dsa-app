@@ -2,7 +2,7 @@
 import sys
 import os
 from dotenv import load_dotenv
-from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QLabel
+from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QLabel, QTableWidget, QTableWidgetItem, QHeaderView
 from src.infrastructure.database import crear_base_datos_y_tablas
 from src.infrastructure.document_analyzer import DocumentAnalyzerService
 from src.infrastructure.ocr_processor import OcrProcessor
@@ -33,6 +33,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.btn_clasificar)
         layout.addWidget(self.lbl_resultado)
 
+        # Añadir Tabla de Consulta
+        self.tabla = QTableWidget(0, 4) # 0 filas iniciales, 4 columnas
+        self.tabla.setHorizontalHeaderLabels(["Folio", "Remitente", "Asunto", "Fase"])
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.tabla)
+
+        # Botón para refrescar la tabla
+        self.btn_consultar = QPushButton("Actualizar Lista de Documentos")
+        layout.addWidget(self.btn_consultar)
+
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
@@ -45,6 +55,32 @@ class MainWindow(QMainWindow):
         self.view_model.estado_cambiado.connect(self.lbl_estado.setText)
         self.view_model.analisis_completado.connect(self.mostrar_resultado)
         self.view_model.fase_cambiada.connect(self.habilitar_botones)
+
+        # Conectar señal de guardado exitoso para refrescar automáticamente
+        self.view_model.estado_cambiado.connect(self.verificar_si_refrescar)
+        self.btn_consultar.clicked.connect(self.cargar_datos_tabla)
+
+    def verificar_si_refrescar(self, mensaje):
+        if "¡Éxito!" in mensaje:
+            self.cargar_datos_tabla()
+
+    def cargar_datos_tabla(self):
+        """Consulta la BD y llena la tabla (Equivalente a ObtenerTodosAsync)"""
+        from sqlmodel import Session, select
+        from src.infrastructure.database import engine
+        from src.domain.entities import DocumentoPrincipal
+
+        with Session(engine) as session:
+            statement = select(DocumentoPrincipal)
+            documentos = session.exec(statement).all()
+            
+            self.tabla.setRowCount(0)
+            for row, doc in enumerate(documentos):
+                self.tabla.insertRow(row)
+                self.tabla.setItem(row, 0, QTableWidgetItem(doc.folio_oficial))
+                self.tabla.setItem(row, 1, QTableWidgetItem(doc.remitente))
+                self.tabla.setItem(row, 2, QTableWidgetItem(doc.asunto))
+                self.tabla.setItem(row, 3, QTableWidgetItem(doc.fase_ciclo_vida.value))
 
     def habilitar_botones(self, fase):
         # Si pasó de nacimiento a ingresado, habilitar botón de IA

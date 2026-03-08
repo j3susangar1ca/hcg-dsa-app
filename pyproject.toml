@@ -1,0 +1,18 @@
+[project]
+name = "hcg-dsa-app"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pyside6==6.6.1",
+    "shiboken6==6.6.1",
+    "sqlmodel==0.0.14",
+    "sqlalchemy==2.0.25",
+    "pydantic==2.5.3",
+    "pydantic-settings==2.1.0",
+    "google-genai==0.3.0",
+    "python-dotenv==1.0.0",
+    "pymupdf==1.23.8"
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-qt", "black", "ruff", "mypy", "types-python-dateutil"]
